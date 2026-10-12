@@ -1,3 +1,4 @@
+
 # Feature-1 Test Cases (QA)
 
 ## Scope
@@ -69,3 +70,4 @@ Project setup, directory structure, Makefile build, starter `ls-v1.0.0` binary b
 - **Steps:** Run `git log --oneline`.
 - **Expected:** Commit message: "feat: Initial project setup with starter code".
 - **Status:** PASS / FAIL
+

@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -g
 SRCDIR = src
 BINDIR = bin
 OBJDIR = obj
-TARGET = $(BINDIR)/ls-v1.1.0
+TARGET = $(BINDIR)/ls-v1.2.0
 SOURCES = $(wildcard $(SRCDIR)/*.c)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 

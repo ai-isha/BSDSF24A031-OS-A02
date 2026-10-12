@@ -8,7 +8,7 @@ if [ -z "$MSG" ]; then
 fi
 
 echo ">> Pulling latest from origin/main..."
-git pull origin main --no-rebase --allow-unrelated-histories --no-edit || {
+# git pull origin main --no-rebase --allow-unrelated-histories --no-edit || {
     echo "!! Pull failed — you probably have a merge conflict."
     echo "!! Fix the conflict, run 'git add <file>' then './push.sh \"msg\"' again."
     exit 1
@@ -21,6 +21,6 @@ echo ">> Committing: $MSG"
 git commit -m "$MSG" || echo "(nothing to commit — pushing anyway)"
 
 echo ">> Pushing to origin/main..."
-git push origin main
+git push origin HEAD
 
 echo ">> Done."

@@ -15,7 +15,58 @@ else if ((st.st_mode & S_IFMT) == S_IFREG) /* regular file */
 Permissions:
 ```c
 (mode & S_IRUSR) ? 'r' : '-'
-(mode & S_IWUSR) ? 'w' : '-'
+
+## Feature 5: Alphabetical Sort — v1.4.0
+
+**Q1: Why is it necessary to read all directory entries into memory before you can sort them? What are the potential drawbacks of this approach for directories containing millions of files?**
+
+Sorting requires seeing the entire data set before deciding the final order. Unlike printing (which can stream one entry at a time as soon as it is read from readdir), sorting is inherently a global operation: an element may have to move arbitrarily far in the output depending on how the rest of the data compares to it. qsort(), like every comparison sort, must examine pairs of elements in an order determined by their values — you cannot decide the final position of any element without knowing about the others. Additionally, readdir() returns entries in an unspecified order that depends on the underlying filesystem implementation, so the raw stream has no useful ordering we can exploit. Therefore the only option is to buffer the entire directory contents into a dynamic array (via malloc/realloc/strdup), sort the array in-place with qsort(), and only after that begin printing.
+
+Drawbacks for very large directories (millions of entries):
+
+1. Memory: each filename is stored twice (once in the kernel dirent buffer transiently, once as a heap-allocated strdup in our array). For N = 10 million entries with average filename length around 30 bytes, that is roughly 300 MB of string data plus about 80 MB of pointers on 64-bit systems — easily hundreds of megabytes of RAM for a single ls invocation.
+
+2. Latency: no output appears until readdir() finishes and qsort() completes. On a directory with millions of entries, the user sees nothing for several seconds and cannot start reading results, unlike the streaming default which prints as it goes.
+
+3. Swap pressure: if the array does not fit in physical RAM, the OS begins to swap, which can make the whole machine sluggish.
+
+4. Time: qsort() is O(N log N) comparisons, each involving strcmp() over the filename. For 10 million entries this is over 200 million string comparisons, adding seconds to the runtime.
+
+5. Signal-safety: buffering holds a lot of state in the middle of the operation, so interrupt and cleanup handling has to free everything correctly.
+
+Real ls mitigates these issues with optimizations such as lazy allocation, streaming into an intermediate buffer, or using a lower-memory representation, but the fundamental tradeoff (memory and latency versus sorted output) remains.
+
+---
+
+**Q2: Explain the purpose and signature of the comparison function required by qsort(). How does it work, and why must it take const void * arguments?**
+
+The comparison function tells qsort() how to order two elements. Its signature is:
+
+    int cmp(const void *a, const void *b);
+
+Purpose: qsort() is a generic algorithm that does not know the type of the elements it is sorting. The function receives two pointers to elements (in the form of const void *) and returns:
+
+- a negative int if the first element should come before the second,
+- zero if they are considered equal,
+- a positive int if the first element should come after the second.
+
+qsort() calls this function repeatedly during the sort and rearranges elements based on the sign of the returned value. In our code:
+
+    int cmp_filenames(const void *a, const void *b) {
+        const char *sa = *(const char * const *)a;
+        const char *sb = *(const char * const *)b;
+        return strcmp(sa, sb);
+    }
+
+The array we pass to qsort is a char ** (an array of pointers to strings). Each element is therefore a char *. The function receives a pointer to an element, i.e., a char **. We cast the void * back to char **, then dereference it once to recover the char * (the actual filename string), and finally pass both strings to strcmp(). strcmp() itself happens to return the exact negative / zero / positive convention qsort() wants, so its return value is used directly.
+
+Why const void *? Two reasons:
+
+1. void * — because qsort() must work for arrays of ANY type (int, double, struct, char *). Using void * hides the type from qsort and lets the caller supply a comparator that knows the real type.
+
+2. const — because the comparator must not modify the elements it is looking at. qsort() moves elements around, but the comparison step must be side-effect free. The const qualifier lets the compiler enforce that we only read through the pointer, never write. This also allows the caller to pass pointers to const data safely.
+
+The C standard specifies this exact signature for the qsort comparator, so any deviation (for example, dropping const) results in undefined behavior or at least compiler warnings.(mode & S_IWUSR) ? 'w' : '-'
 (mode & S_IXUSR) ? 'x' : '-'
 ```
 

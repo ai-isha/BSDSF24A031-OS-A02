@@ -1,4 +1,51 @@
 
+## Feature 6: Colorized Output — v1.5.0
+
+**Q1: How do ANSI escape codes work to produce color in a standard Linux terminal? Show the specific code sequence for printing text in green.**
+
+ANSI escape codes are special byte sequences embedded in the output stream that a terminal emulator interprets as commands rather than printable characters. Each sequence begins with the ESC character (ASCII 27, written as `\033` in C or `\e` in shell), followed by a Control Sequence Introducer (`[`), then a numeric code (or codes separated by semicolons) describing the desired effect, and finally a terminating letter such as `m` that means "set graphic rendition".
+
+When the terminal sees such a sequence, it does not display those bytes; instead it changes the current text attributes (foreground color, background color, bold, underline, reverse video, etc.) for all subsequently printed characters. To restore the default appearance, a reset sequence is emitted.
+
+For green text, the sequence is:
+
+    "\033[0;32m"
+
+Breakdown:
+
+- `\033` — ESC (0x1B)
+- `[` — start of the control sequence
+- `0` — attribute parameter, meaning "reset / normal intensity"
+- `;` — separator between parameters
+- `32` — foreground color code for green
+- `m` — final byte, "Set Graphics Rendition"
+
+So the full printf call for green text is:
+
+    printf("\033[0;32m%s\033[0m", name);
+
+where `\033[0m` (the reset code) is appended after the text so the next output returns to the terminal's default color. Our code stores these as named macros (C_GREEN, C_RESET, etc.) in ls-v1.5.0.c so the printing functions stay readable.
+
+---
+
+**Q2: To color an executable file, you need to check its permission bits. Explain which bits in the st_mode field you need to check to determine if a file is executable by the owner, group, or others.**
+
+The execute bits live in the low 9 bits of `st_mode`:
+
+- `S_IXUSR` — owner (user) execute bit
+- `S_IXGRP` — group execute bit
+- `S_IXOTH` — others execute bit
+
+These are defined in `<sys/stat.h>` and correspond to bit masks `0o100`, `0o010`, and `0o001` respectively. A file is considered executable by GNU ls (and by our implementation) if ANY of the three bits is set — that is, if `st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)` is non-zero.
+
+Example:
+
+    if ((st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0)
+        /* file is executable; color green */
+
+This covers all three cases (owner-only executables like 0700, group executables like 0750, others-executables like 0755, and the fully-open 0777). It matches the semantics of the kernel's access() check that a normal user would experience: a file is runnable if it has at least one x bit for whoever is trying to run it.
+
+Note that we specifically do NOT check for read or write bits here; executability is entirely determined by the x bits. Also, GNU ls chooses the "executable" color only for regular files with an x bit — directories with x bits are still shown in blue (S_ISDIR takes priority), which is why our `color_for()` function checks `S_ISDIR` and `S_ISLNK` before looking at the execute bits.
 ## Feature 2: Long Listing (v1.1.0)
 
 **Q1: stat() vs lstat()**

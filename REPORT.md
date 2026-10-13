@@ -65,3 +65,52 @@ Limitations of using a fixed-width fallback of 80:
 4. Different users have different default terminal sizes — a fixed fallback forces one layout for everyone.
 
 The correct approach is to query ioctl(TIOCGWINSZ) and only fall back to a safe constant (80) when the call fails, e.g., when stdout is a pipe or a file with no terminal attached.
+
+## Feature 4: Horizontal Column Display (-x) — v1.3.0
+
+**Q1: Compare the implementation complexity of the "down then across" (vertical) printing logic versus the "across" (horizontal) printing logic. Which one requires more pre-calculation and why?**
+
+The down-then-across (vertical) logic requires more pre-calculation.
+
+For down-then-across we must know:
+1. The total number of files N.
+2. The longest filename length L (to compute column width = L + spacing).
+3. The terminal width W (via ioctl(TIOCGWINSZ)).
+4. The number of columns C = W / column_width.
+5. The number of rows R = ceil(N / C).
+
+Only after all five values are known can we print anything, because the file at visual position (row r, column c) is at index c * R + r in the array. This is a column-major mapping. The entire layout has to be computed before the first character is written, and files must be collected into memory first (dynamic array via malloc/realloc/strdup).
+
+The across (horizontal) logic is simpler: walk the array left to right, printing each name padded to column width, and count the current horizontal position. When pos + col_width > W, emit a newline and reset pos = 0. No need to know total count N or row count R. The algorithm is a single streaming loop using O(1) extra state.
+
+So: down-then-across is more complex because it needs a global picture of the data before printing; across is local and streaming.
+
+---
+
+**Q2: Describe the strategy you used in your code to manage the different display modes (-l, -x, and default). How did your program decide which function to call for printing?**
+
+I used a single global enum and a dispatch switch in main:
+
+    enum display_mode { MODE_COLUMN, MODE_LONG, MODE_HORIZONTAL };
+    static enum display_mode g_mode = MODE_COLUMN;
+
+During argument parsing, the getopt loop in main updates g_mode whenever a relevant flag is seen:
+
+    while ((opt = getopt(argc, argv, "lx")) != -1) {
+        switch (opt) {
+            case 'l': g_mode = MODE_LONG;       break;
+            case 'x': g_mode = MODE_HORIZONTAL; break;
+        }
+    }
+
+This means if both -l and -x are given, the last one wins, which mirrors the behavior of real ls.
+
+After parsing, main iterates over the directory arguments and dispatches to the right function via a nested switch:
+
+    switch (g_mode) {
+        case MODE_LONG:       do_ls_long(dir);      break;
+        case MODE_HORIZONTAL: list_horizontal(dir); break;
+        default:              list_columns(dir);    break;
+    }
+
+Each mode has its own dedicated function that shares common helpers (format_perms, format_time, collect_files, get_terminal_width). This keeps mode-selection logic in one place (main), printing logic in small focused functions, and avoids scattering flag checks. Adding a new mode in future only requires a new enum value, a new getopt letter, and a new case in the dispatch switch.

@@ -1,4 +1,36 @@
 
+## Feature 7: Recursive Listing (-R) — v1.6.0
+
+**Q1: In a recursive function, what is a "base case"? In the context of your recursive ls, what is the base case that stops the recursion from continuing forever?**
+
+A base case is the condition under which a recursive function stops calling itself and returns directly. Every well-formed recursive function must have at least one base case; without it, the function would keep calling itself on smaller and smaller (or on the same) inputs forever, quickly exhausting the call stack and crashing with a stack overflow.
+
+In our recursive ls, the recursion is driven by do_ls(dir): it prints the directory listing and then, for each entry that is a directory, calls do_ls(subdir). The base case occurs naturally: when a directory contains no subdirectories, the loop over entries finds no directory that would trigger a recursive call, so do_ls simply returns after printing the listing. In other words, the base case is "there are no subdirectories left to descend into".
+
+Additionally, our implementation has two implicit guards that help terminate the recursion cleanly:
+
+1. Hidden entries (names beginning with '.') are skipped in collect_files_sorted(), so the special entries "." and ".." — which would otherwise create an infinite loop (each directory links back to itself and its parent) — are never followed.
+
+2. lstat() is used on each constructed path. If a symlink points to a directory, S_ISDIR(st.st_mode) is false (because lstat reports the link itself, not the target), so we do not descend into symlinked directories. This prevents cycles such as /a/link → /a that would make the recursion non-terminating.
+
+With these guards, recursion depth is bounded by the actual depth of the directory tree, and the base case (a directory with no subdirectories) terminates each branch.
+
+---
+
+**Q2: Explain why it is essential to construct a full path (e.g., "parent_dir/subdir") before making a recursive call. What would happen if you simply called do_ls("subdir") from within the do_ls("parent_dir") function call?**
+
+The reason is that do_ls() is invoked from the current working directory, and it passes whatever string it receives directly to opendir() and lstat(). Those system calls interpret the string as a path relative to the process's current working directory — NOT relative to the directory currently being scanned. The program never chdir()s into the directory it is listing.
+
+Consider a scenario. The user runs ls -R /home/user/proj. main() calls do_ls("/home/user/proj"). Inside do_ls, we read entries and find a subdirectory called "src". We want to recurse into it. If we called do_ls("src") directly, opendir("src") would be interpreted relative to the current working directory — say /home/ayesha — and would try to open /home/ayesha/src, which either does not exist or is a completely different directory. The recursion would either fail ("Cannot open directory : src") or, worse, silently list the wrong tree.
+
+The fix is to construct the full path before recursing:
+
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", dir, files[i]);
+    do_ls(fullpath);
+
+Now when the recursive call's opendir(fullpath) runs, fullpath is an absolute (or appropriately relative) path such as /home/user/proj/src that resolves to the correct directory regardless of the process's CWD. The same applies to lstat() inside the recursive call: without the full path, the metadata would be looked up in the wrong place, and the recursion would either terminate prematurely or descend into the wrong directories.
+
+In short: the directory argument is a path to be resolved from the process's CWD, so any child path must be built by prefixing the parent path. Skipping this step breaks correctness at depth 1 and beyond.
 ## Feature 6: Colorized Output — v1.5.0
 
 **Q1: How do ANSI escape codes work to produce color in a standard Linux terminal? Show the specific code sequence for printing text in green.**
